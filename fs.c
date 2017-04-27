@@ -42,26 +42,47 @@ int fs_format()
 
 void fs_debug()
 {
-	int i;
+	int i, j, k, ninodes, ninodeblocks, nblocks;
 	union fs_block block;
 
 	disk_read(0,block.data);
 
 	printf("superblock:\n");
 	if (block.super.magic == FS_MAGIC)
-		printf("    magic number is valid\n");
-	else
-		printf("    magic number is NOT valid\n");
-	printf("    %d blocks\n",block.super.nblocks);
-	printf("    %d inode blocks\n",block.super.ninodeblocks);
-	printf("    %d inodes\n",block.super.ninodes);
-	for(i = 0; i < block.super.ninodeblocks; i++){
-		if(block.inode[i].isvalid == 1){
-			printf("inode %d:\n", i+2);
-			printf("    size: %d bytes\n", block.inode[i].size);
-			printf("    direct blocks: \n");//######\n");		//prob. going to need for loop
-			printf("    indirect block: %d\n", block.inode[i].indirect);		//prob. going to need for loop
-			printf("    inidrect data blocks: ######\n");	//prob goint to need for loop
+		printf("\tmagic number is valid\n");
+	else{
+		printf("\tmagic number is NOT valid\n");
+		return;
+	}
+	ninodes = block.super.ninodes;
+	ninodeblocks = block.super.ninodeblocks;
+	nblocks = block.super.nblocks;
+
+	printf("\t%d blocks\n",block.super.nblocks);
+	printf("\t%d inode blocks\n",block.super.ninodeblocks);
+	printf("\t%d inodes\n",block.super.ninodes);
+	for(i = 0; i < ninodeblocks; i++){
+		disk_read(i+1, block.data);
+		for(j = 0; j < INODES_PER_BLOCK; j++){
+			if(block.inode[j].isvalid == 1){
+				printf("inode %d:\n", (i*INODES_PER_BLOCK)+j);
+				printf("\tsize: %d bytes\n", block.inode[j].size);
+				printf("\tdirect blocks:");
+				for(k = 0; k < POINTERS_PER_INODE; k++){
+					if(block.inode[j].direct[k] != 0){
+						printf(" %d", block.inode[j].direct[k]);
+					}
+				}
+				if (block.inode[j].indirect > 0){
+					printf("\tindirect block: %d\n", block.inode[j].indirect);
+					disk_read(block.inode[j].indirect, block.data);
+					printf("\tindirect blocks:");
+					for (k = 0; k < POINTERS_PER_BLOCK; k++){
+						printf(" %d", block.pointers[k]);
+					}
+				}
+
+			}
 		}
 	}
 }
