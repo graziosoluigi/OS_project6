@@ -1,4 +1,3 @@
-
 #include "fs.h"
 #include "disk.h"
 
@@ -8,11 +7,10 @@
 #include <errno.h>
 #include <unistd.h>
 
-#define DISK_BLOVK_SIZE 4096
 #define FS_MAGIC           0xf0f03410
 #define INODES_PER_BLOCK   128
-#define POINTERS_PER_INODE 5			//number of direct pointers in each inode
-#define POINTERS_PER_BLOCK 1024			//pointers to be found in an indirect block
+#define POINTERS_PER_INODE 5
+#define POINTERS_PER_BLOCK 1024
 
 struct fs_superblock {
 	int magic;
@@ -45,36 +43,37 @@ void fs_debug()
 	int i, j, k, ninodes, ninodeblocks, nblocks;
 	int check;
 	union fs_block block;
+	union fs_block temp;
 
 	disk_read(0,block.data);
 
 	printf("superblock:\n");
 	if (block.super.magic == FS_MAGIC)
-		printf("\tmagic number is valid\n");
+		printf("    magic number is valid\n");
 	else{
-		printf("\tmagic number is NOT valid\n");
+		printf("    magic number is NOT valid\n");
 		return;
 	}
 	ninodes = block.super.ninodes;
 	ninodeblocks = block.super.ninodeblocks;
 	nblocks = block.super.nblocks;
 
-	printf("\t%d blocks\n",block.super.nblocks);
-	printf("\t%d inode blocks\n",block.super.ninodeblocks);
-	printf("\t%d inodes\n",block.super.ninodes);
+	printf("    %d blocks\n",block.super.nblocks);
+	printf("    %d inode blocks\n",block.super.ninodeblocks);
+	printf("    %d inodes\n",block.super.ninodes);
 	for(i = 0; i < ninodeblocks; i++){
 		disk_read(i+1, block.data);
 		for(j = 0; j < INODES_PER_BLOCK; j++){
-			//printf ("j = %d\t", j); printf("size = %d\n", block.inode[j].size);
+
 			if(block.inode[j].isvalid == 1){
 				printf("inode %d:\n", (i*INODES_PER_BLOCK)+j);
-				printf("\tsize: %d bytes\n", block.inode[j].size);
+				printf("    size: %d bytes\n", block.inode[j].size);
 				
 				check = 0;
 				for(k = 0; k < POINTERS_PER_INODE; k++){
 					if(block.inode[j].direct[k] != 0){
 						if (check == 0){
-							printf("\tdirect blocks:");
+							printf("    direct blocks:");
 							check = 1;
 						}
 						printf(" %d", block.inode[j].direct[k]);
@@ -84,17 +83,17 @@ void fs_debug()
 					printf("\n");
 				
 				if (block.inode[j].indirect > 0){
-					printf("\tindirect block: %d\n", block.inode[j].indirect);
-					disk_read(block.inode[j].indirect, block.data);
+					printf("    indirect block: %d\n", block.inode[j].indirect);
+					disk_read(block.inode[j].indirect, temp.data);
 					check = 0;
 					for (k = 0; k < POINTERS_PER_BLOCK; k++){
-						if (block.pointers[k] == 0)
+						if (temp.pointers[k] == 0)
 							break;
 						if (check == 0){
-							printf("\tindirect data blocks:");
+							printf("    indirect data blocks:");
 							check = 1;
 						}
-						printf(" %d", block.pointers[k]);
+						printf(" %d", temp.pointers[k]);
 					}
 					if (check == 1)
 						printf("\n");
