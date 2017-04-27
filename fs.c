@@ -43,6 +43,7 @@ int fs_format()
 void fs_debug()
 {
 	int i, j, k, ninodes, ninodeblocks, nblocks;
+	int check;
 	union fs_block block;
 
 	disk_read(0,block.data);
@@ -64,22 +65,39 @@ void fs_debug()
 	for(i = 0; i < ninodeblocks; i++){
 		disk_read(i+1, block.data);
 		for(j = 0; j < INODES_PER_BLOCK; j++){
+			//printf ("j = %d\t", j); printf("size = %d\n", block.inode[j].size);
 			if(block.inode[j].isvalid == 1){
 				printf("inode %d:\n", (i*INODES_PER_BLOCK)+j);
 				printf("\tsize: %d bytes\n", block.inode[j].size);
-				printf("\tdirect blocks:");
+				
+				check = 0;
 				for(k = 0; k < POINTERS_PER_INODE; k++){
 					if(block.inode[j].direct[k] != 0){
+						if (check == 0){
+							printf("\tdirect blocks:");
+							check = 1;
+						}
 						printf(" %d", block.inode[j].direct[k]);
 					}
 				}
+				if (check == 1) 
+					printf("\n");
+				
 				if (block.inode[j].indirect > 0){
 					printf("\tindirect block: %d\n", block.inode[j].indirect);
 					disk_read(block.inode[j].indirect, block.data);
-					printf("\tindirect blocks:");
+					check = 0;
 					for (k = 0; k < POINTERS_PER_BLOCK; k++){
+						if (block.pointers[k] == 0)
+							break;
+						if (check == 0){
+							printf("\tindirect data blocks:");
+							check = 1;
+						}
 						printf(" %d", block.pointers[k]);
 					}
+					if (check == 1)
+						printf("\n");
 				}
 
 			}
