@@ -35,6 +35,21 @@ union fs_block {
 
 int fs_format()
 {
+	const char blank_block[DISK_BLOCK_SIZE] = {0};
+	union fs_block block;
+	block.super.magic = FS_MAGIC;
+	block.super.nblocks = nblocks;
+	block.super.ninodeblocks = nblocks / 10;
+	if(nblocks % 10 > 0)
+		block.super.ninodeblocks++;
+	block.super.ninodes = ninodeblocks * INODES_PER_BLOCK;
+	
+	int i;
+	disk_write(0, block.data);
+	for(i = 0; i < block.super.ninodeblocks; i++){
+		disk_write(i+1, blank_block);
+	}
+	
 	return 0;
 }
 
