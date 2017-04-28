@@ -261,7 +261,10 @@ int fs_read( int inumber, char *data, int length, int offset )
 		return 0;
 	if(inumber >= ninodes || inumber <= 0)
 		return 0;
+	if(length <= 0)
+		return 0;
 	union fs_block block;
+	union fs_block data_block;
 	int inode, ishift;
 	inode = inumber / INODES_PER_BLOCK;
 	ishift = inumber % INODES_PER_BLOCK;
@@ -271,10 +274,72 @@ int fs_read( int inumber, char *data, int length, int offset )
 	if(block.inode[ishift].size <= offset || block.inode[ishift].size == 0)
 		return 0;
 	
+	int size = block.inode[ishift].size;
+	
+	int iblock, iblockshift;
+	int tot_count = 0;
+	iblock = offset / DISK_BLOCK_SIZE;
+	iblockshift = offset % DISK_BLOCK_SIZE;
+	int i, j;
+	
+	for(i = iblock; i < POINTERS_PER_INODE; i++){
+		disk_read(block.inode[ishift].direct[i], data_block.data);
+		for(j = 0; j < DISK_BLOCK_SIZE; j++){
+			if(iblock == i && tot_count == 0) j = iblockshift;
+			if(tot_count < length && tot_count < size-offset){
+				memmove(data+tot_count, data_block.data+j, 1);
+				tot_count++;
+			} else {
+				return tot_count;
+			}
+		}
+	}
+	if(!(tot_count < length && tot_count < size-offset))
+		return tot_count;
+	disk_read(block.inode[ishift].indirect, block.data);
+	
+	i = 0;
+	while(block.pointers[i] != 0){
+		disk_read(block.pointers[i], data_block.data);
+		for(j = 0; j < DISK_BLOCK_SIZE; j++){
+			if(iblock == i + POINTERS_PER_INODE && tot_count == 0) j = iblockshift;
+			if(tot_count < length && tot_count < size-offset){
+				memmove(data+tot_count, data_block.data+j, 1);
+				tot_count++;
+			} else {
+				return tot_count;
+			}
+		}
+		i++;
+	}
+	if(!(tot_count < length && tot_count < size-offset))
+		return tot_count;
+	
 	return 0;
 }
 
 int fs_write( int inumber, const char *data, int length, int offset )
 {
+	if(IS_MOUNTED != 1)
+		return 0;
+	if(inumber >= ninodes || inumber <= 0)
+		return 0;
+	if(length <= 0)
+		return 0;
+	union fs_block block;
+	union fs_block data_block;
+	
+	int blocks_needed;
+	block_needed = length/DISK_BLOCK_SIZE;
+	
+	int inode, ishift;
+	inode = inumber / INODES_PER_BLOCK;
+	ishift = inumber % INODES_PER_BLOCK;
+	disk_read(inode+1, block.data);
+	if(block.inode[ishift].isvalid != 1)
+		return 0;
+	if(block.inode[ishift].size <= offset || block.inode[ishift].size == 0)
+		return 0;
+	
 	return 0;
 }
