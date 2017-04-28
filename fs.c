@@ -12,6 +12,9 @@
 #define POINTERS_PER_INODE 5
 #define POINTERS_PER_BLOCK 1024
 int IS_MOUNTED = 0;
+int ninodeblocks = 0;
+int nblocks = 0;
+int ninodes = 0;
 int* bitmap = NULL;
 
 struct fs_superblock {
@@ -63,8 +66,8 @@ void fs_debug()
 	int i, j, k, ninodes, ninodeblocks, nblocks;
 	int check;
 	union fs_block block;
-	union fs_block temp;
-
+	union fs_block indirect;
+	
 	disk_read(0,block.data);
 
 	printf("superblock:\n");
@@ -89,7 +92,7 @@ void fs_debug()
 				printf("inode %d:\n", (i*INODES_PER_BLOCK)+j);
 				printf("    size: %d bytes\n", block.inode[j].size);
 				if(block.inode[j].size == 0)
-					break;
+					continue;
 				
 				check = 0;
 				for(k = 0; k < POINTERS_PER_INODE; k++){
@@ -106,16 +109,16 @@ void fs_debug()
 				
 				if (block.inode[j].indirect > 0){
 					printf("    indirect block: %d\n", block.inode[j].indirect);
-					disk_read(block.inode[j].indirect, temp.data);
+					disk_read(block.inode[j].indirect, indirect.data);
 					check = 0;
 					for (k = 0; k < POINTERS_PER_BLOCK; k++){
-						if (temp.pointers[k] == 0)
+						if (indirect.pointers[k] == 0)
 							break;
 						if (check == 0){
 							printf("    indirect data blocks:");
 							check = 1;
 						}
-						printf(" %d", temp.pointers[k]);
+						printf(" %d", indirect.pointers[k]);
 					}
 					if (check == 1)
 						printf("\n");
@@ -135,8 +138,9 @@ int fs_mount()
 	if(block.super.magic != FS_MAGIC)
 		return 0;
 
-	int ninodeblocks = block.super.ninodeblocks;
-	int nblocks = block.super.nblocks;
+	ninodeblocks = block.super.ninodeblocks;
+	nblocks = block.super.nblocks;
+	ninodes = block.super.ninodes;
 
 
 	if(bitmap != NULL) free(bitmap);
@@ -180,18 +184,14 @@ int fs_create()
 	union fs_block block;
 	int i, j;
 
-	disk_read(0, block.data);
-	struct fs_superblock super = block.super;
-
-	for(i = 0; i < super.ninodeblocks; i++){
+	for(i = 0; i < ninodeblocks; i++){
 		disk_read(i+1, block.data);
 		for(j = 0; j < INODES_PER_BLOCK; j++){
-			if(block.inode[j].isvalid == 0){
-				printf("j = %d\n", j);
+			if(block.inode[j].isvalid == 0 && (i*INODES_PER_BLOCK)+j != 0){
 				block.inode[j].isvalid = 1;
 				block.inode[j].size = 0;
 				disk_write(i+1, block.data);
-				return (i*INODES_PER_BLOCK) + j + 1;
+				return (i*INODES_PER_BLOCK) + j;
 			}
 		}
 	}
@@ -200,16 +200,13 @@ int fs_create()
 
 int fs_delete( int inumber )
 {
-	inumber--;
 	if(IS_MOUNTED != 1)
 		return 0;
-	union fs_block block;
-	union fs_block temp;
-	int inode, ishift;
-
-	disk_read(0, block.data);
-	if (inumber > block.super.ninodes || inumber < 0)
+	if (inumber >= ninodes || inumber <= 0)
 		return 0;
+	union fs_block block;
+	union fs_block indirect;
+	int inode, ishift;
 
 	inode = inumber / INODES_PER_BLOCK;
 	ishift = inumber % INODES_PER_BLOCK;
@@ -224,34 +221,56 @@ int fs_delete( int inumber )
 			bitmap[block.inode[ishift].direct[i]] = 0;
 	}
 	if(block.inode[ishift].indirect > 0){
-		disk_read(block.inode[ishift].indirect, temp.data);
+		disk_read(block.inode[ishift].indirect, indirect.data);
 		for(i = 0; i < POINTERS_PER_BLOCK; i++){
-			if(temp.pointers[i] == 0)
+			if(indirect.pointers[i] == 0)
 				break;
-			bitmap[temp.pointers[i]] = 0;
-			temp.pointers[i] = 0;
+			bitmap[indirect.pointers[i]] = 0;
+			indirect.pointers[i] = 0;
 		}
 		bitmap[block.inode[ishift].indirect] = 0;
-		disk_write(block.inode[ishift].indirect, temp.data);
+		disk_write(block.inode[ishift].indirect, indirect.data);
 	}
 
 	block.inode[ishift].isvalid = 0;
 	block.inode[ishift].size = 0;
 
 	disk_write(inode+1, block.data);
-
-
-
 	return 1;
 }
 
 int fs_getsize( int inumber )
 {
-	return -1;
+	if(IS_MOUNTED != 1)
+		return -1;
+	if (inumber >= ninodes || inumber <= 0)
+		return -1;
+	union fs_block block;
+	int inode, ishift;
+	inode = inumber / INODES_PER_BLOCK;
+	ishift = inumber % INODES_PER_BLOCK;
+	disk_read(inode+1, block.data);
+	if(block.inode[ishift].isvalid != 1)
+		return -1;
+	return block.inode[ishift].size;
 }
 
 int fs_read( int inumber, char *data, int length, int offset )
 {
+	if(IS_MOUNTED != 1)
+		return 0;
+	if(inumber >= ninodes || inumber <= 0)
+		return 0;
+	union fs_block block;
+	int inode, ishift;
+	inode = inumber / INODES_PER_BLOCK;
+	ishift = inumber % INODES_PER_BLOCK;
+	disk_read(inode+1, block.data);
+	if(block.inode[ishift].isvalid != 1)
+		return 0;
+	if(block.inode[ishift].size <= offset || block.inode[ishift].size == 0)
+		return 0;
+	
 	return 0;
 }
 
