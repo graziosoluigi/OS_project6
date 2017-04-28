@@ -51,13 +51,13 @@ int fs_format()
 	if(disk_size() % 10 > 0)
 		block.super.ninodeblocks++;
 	block.super.ninodes = block.super.ninodeblocks * INODES_PER_BLOCK;
-	
+
 	int i;
 	disk_write(0, block.data);
 	for(i = 0; i < block.super.ninodeblocks; i++){
 		disk_write(i+1, blank_block);
 	}
-	
+
 	return 1;
 }
 
@@ -67,7 +67,7 @@ void fs_debug()
 	int check;
 	union fs_block block;
 	union fs_block indirect;
-	
+
 	disk_read(0,block.data);
 
 	printf("superblock:\n");
@@ -93,7 +93,7 @@ void fs_debug()
 				printf("    size: %d bytes\n", block.inode[j].size);
 				if(block.inode[j].size == 0)
 					continue;
-				
+
 				check = 0;
 				for(k = 0; k < POINTERS_PER_INODE; k++){
 					if(block.inode[j].direct[k] != 0){
@@ -106,7 +106,7 @@ void fs_debug()
 				}
 				if (check == 1) 
 					printf("\n");
-				
+
 				if (block.inode[j].indirect > 0){
 					printf("    indirect block: %d\n", block.inode[j].indirect);
 					disk_read(block.inode[j].indirect, indirect.data);
@@ -273,15 +273,15 @@ int fs_read( int inumber, char *data, int length, int offset )
 		return 0;
 	if(block.inode[ishift].size <= offset || block.inode[ishift].size == 0)
 		return 0;
-	
+
 	int size = block.inode[ishift].size;
-	
+
 	int iblock, iblockshift;
 	int tot_count = 0;
 	iblock = offset / DISK_BLOCK_SIZE;
 	iblockshift = offset % DISK_BLOCK_SIZE;
 	int i, j;
-	
+
 	for(i = iblock; i < POINTERS_PER_INODE; i++){
 		disk_read(block.inode[ishift].direct[i], data_block.data);
 		for(j = 0; j < DISK_BLOCK_SIZE; j++){
@@ -297,8 +297,9 @@ int fs_read( int inumber, char *data, int length, int offset )
 	if(!(tot_count < length && tot_count < size-offset))
 		return tot_count;
 	disk_read(block.inode[ishift].indirect, block.data);
-	
+
 	i = 0;
+	if(iblock > POINTERS_PER_INODE) i = iblock - POINTERS_PER_INODE;
 	while(block.pointers[i] != 0){
 		disk_read(block.pointers[i], data_block.data);
 		for(j = 0; j < DISK_BLOCK_SIZE; j++){
@@ -314,7 +315,7 @@ int fs_read( int inumber, char *data, int length, int offset )
 	}
 	if(!(tot_count < length && tot_count < size-offset))
 		return tot_count;
-	
+
 	return 0;
 }
 
@@ -328,18 +329,109 @@ int fs_write( int inumber, const char *data, int length, int offset )
 		return 0;
 	union fs_block block;
 	union fs_block data_block;
-	
-	int blocks_needed;
-	block_needed = length/DISK_BLOCK_SIZE;
-	
+	int i, j;
+
 	int inode, ishift;
 	inode = inumber / INODES_PER_BLOCK;
 	ishift = inumber % INODES_PER_BLOCK;
 	disk_read(inode+1, block.data);
 	if(block.inode[ishift].isvalid != 1)
 		return 0;
-	if(block.inode[ishift].size <= offset || block.inode[ishift].size == 0)
-		return 0;
+	if(offset+length > block.inode[ishift].size){
+		block.inode[ishift].size = offset+length;
+		int blocks_needed = (length+offset)/DISK_BLOCK_SIZE;
+		if(length % DISK_BLOCK_SIZE > 0) blocks_needed++;
+
+		for(i = 0; i < blocks_needed; i++){
+			if(i < POINTERS_PER_INODE){
+				if(block.inode[ishift].direct[i] == 0){
+					j = allocate_block();
+					if(j == 0) 
+						return 0;
+					block.inode[ishift].direct[i] = j;
+				}
+			} else {
+				if(block.inode[ishift].indirect == 0){
+					j = allocate_block();
+					if(j == 0)
+						return 0;
+					block.inode[ishift].indirect = j;
+				}
+				break;
+			}
+		}
+		disk_write(inode+1, block.data);
+		if( blocks_needed > POINTERS_PER_INODE){
+			disk_read(block.inode[ishift].indirect, block.data);
+			for(i = 0; i < blocks_needed - POINTERS_PER_INODE; i++){
+				j = allocate_block();
+				if(j == 0)
+					return 0;
+				block.pointers[i] = j;
+			}
+		}
+	}
+
+
+	int iblock, iblockshift;
+	int tot_count = 0;
+	iblock = offset / DISK_BLOCK_SIZE;
+	iblockshift = offset % DISK_BLOCK_SIZE;
+	disk_read(inode+1, block.data);
 	
+	for(i = iblock; i < POINTERS_PER_INODE; i++){
+		disk_read(block.inode[ishift].direct[i], data_block.data);
+		for(j = 0; j < DISK_BLOCK_SIZE; j++){
+			if(iblock == i && tot_count == 0) j = iblockshift;
+			if(tot_count < length){
+				memmove(data_block.data+j, data+tot_count, 1);
+				tot_count++;
+			} else {
+				disk_write(block.inode[ishift].direct[i], data_block.data);
+				return tot_count;
+			}
+		}
+		disk_write(block.inode[ishift].direct[i], data_block.data);
+	}
+	if(!(tot_count < length)){
+		disk_write(block.inode[ishift].direct[i], data_block.data);
+		return tot_count;
+	}
+	disk_read(block.inode[ishift].indirect, block.data);
+
+	i = 0;
+	if(iblock > POINTERS_PER_INODE) i = iblock - POINTERS_PER_INODE;
+	while(block.pointers[i] != 0){
+		disk_read(block.pointers[i], data_block.data);
+		for(j = 0; j < DISK_BLOCK_SIZE; j++){
+			if(iblock == i + POINTERS_PER_INODE && tot_count == 0) j = iblockshift;
+			if(tot_count < length ){
+				memmove(data_block.data+j, data+tot_count, 1);
+				tot_count++;
+			} else {
+				disk_write(block.inode[ishift].direct[i], data_block.data);
+				return tot_count;
+			}
+		}
+		disk_write(block.pointers[i], data_block.data);
+		i++;
+	}
+	if(!(tot_count < length)){
+		disk_write(block.inode[ishift].direct[i], data_block.data);
+		return tot_count;
+	}
+		
+	return 0;
+}
+
+int allocate_block(){
+
+	int i;
+	for(i = 0; i < nblocks; i++){
+		if(bitmap[i] == 0){
+			bitmap[i] = 1;
+			return i;
+		}
+	}
 	return 0;
 }

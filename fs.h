@@ -1,6 +1,8 @@
 #ifndef FS_H
 #define FS_H
 
+int allocate_block();
+
 void fs_debug();
 int  fs_format();
 int  fs_mount();
